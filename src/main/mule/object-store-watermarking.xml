@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+	<os:object-store name="Object_store" doc:name="Object store" doc:id="7e8b63e9-cc63-4a4e-ae17-4b5ea871b75a" />
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="3a86503b-5eb3-4568-a04e-4e9c8565c9d0" >
+		<db:my-sql-connection host="localhost" port="3306" user="root" password="Alex@mysql2023!" database="contactsdb" />
+	</db:config>
+	<file:config name="File_Config" doc:name="File Config" doc:id="57b94593-4634-4fb9-84e3-3d7f085dab55" >
+		<file:connection workingDir="C:\MuleSoft\projects" />
+	</file:config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="321de2e4-0460-45fd-b5c2-b306252c6f4c" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<flow name="object-store-watermarkingFlow1" doc:id="cf6bbf4e-5827-4356-9b52-9ee4a3d1f9af" >
+		<http:listener doc:name="Listener" doc:id="5ec4c6b2-e38c-4c47-b37f-14c011b9d206" config-ref="HTTP_Listener_config" path="/watermarking"/>
+		<db:select doc:name="Select" doc:id="5f6cb416-eac5-4ced-9602-5d3a51225ea2" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT *FROM contacts where id >:id]]></db:sql>
+		</db:select>
+		<logger level="INFO" doc:name="Logger" doc:id="5239b8a6-676b-4646-96f3-68295103d325" message="#[payload]"/>
+	</flow>
+	
+	<!-- Initialization Flow -->
+	<flow name="object-store-initializationFlow" doc:id="e00d33da-c75a-49ce-8074-e020770e95d1" >
+		<os:retrieve doc:name="Retrieve" doc:id="c63d961a-31df-415c-93fe-7aa3068f8180" key="id" objectStore="Object_store" target="initialId">
+			<os:default-value><![CDATA[0]]></os:default-value>
+		</os:retrieve>
+		<logger level="INFO" doc:name="Logger" doc:id="5bc0c2a5-dc69-4ed3-a121-9eab4700935a" message="Initial ID: #[vars.initialId]" />
+		<ee:transform doc:name="Transform Message" doc:id="f082d90f-c761-428e-940e-7007fdad9d98" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+vars.initialId]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="object-store-watermarkingFlow" doc:id="002c9a69-fb86-4efd-bf8b-48290beed3b7" >
+		<scheduler doc:name="Scheduler" doc:id="b65cf786-e9d7-4b54-abd6-94c2d45230db" >
+			<scheduling-strategy >
+				<fixed-frequency />
+			</scheduling-strategy>
+		</scheduler>
+		<os:retrieve doc:name="Retrieve" doc:id="410096ca-dcbe-4d53-85b8-8378284dd117" key="id" objectStore="Object_store" target="watermark">
+			<os:default-value ><![CDATA[#[-1]]]></os:default-value>
+		</os:retrieve>
+		<db:select doc:name="Select" doc:id="2f299406-6735-4c2e-8fa1-58a73fb82adb" config-ref="Database_Config">
+			<db:sql ><![CDATA[SELECT *FROM contacts where id >:id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	id: vars.watermark
+}]]]></db:input-parameters>
+		</db:select>
+		<logger level="INFO" doc:name="Logger" doc:id="6ad34c5b-5e59-4f15-ac29-078bb0cfdd80" message="#[vars.watermark]"/>
+		<os:store doc:name="Store" doc:id="32313313-6cf9-434d-ad45-19f0ac37f182" key="id" objectStore="Object_store">
+    <os:value ><![CDATA[#[if (sizeOf(payload) > 0 and payload.id != null) max(payload map $.id) else -1]]]></os:value>
+</os:store>
+
+		<logger level="INFO" doc:name="Logger" doc:id="13f3ed99-dcf6-4cae-9044-066282513511" message="#[vars.watermark]"/>
+		<ee:transform doc:name="Transform Message" doc:id="647b2947-3dc2-4b4c-be40-6a30c4a31793" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<file:write doc:name="Write" doc:id="4f700f15-1f54-43ac-b0a1-faf182e36cb8" config-ref="File_Config" path="C:\MuleSoft\projects\output\objectStore_wm.txt"/>
+	</flow>
+</mule>
